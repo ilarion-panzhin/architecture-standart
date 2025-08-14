@@ -1,55 +1,80 @@
 @startuml
 !includeurl https://raw.githubusercontent.com/RicardoNiepel/C4-PlantUML/master/C4_Context.puml
 LAYOUT_TOP_DOWN()
+
 title C4‑L1: Контекст — Открытие депозитов онлайн (MVP)
 
-' === КЛИЕНТЫ И ПОЛЬЗОВАТЕЛИ (НАВЕРХУ) ===
-together {
-  Person(newClient, "Клиент (новый)", "Подаёт заявку через сайт")
-  Person(existingClient, "Клиент (действующий)", "Оформляет депозит в интернет‑банке")
-  Person(operator, "Оператор кол‑центра", "Работает в CRM")
+' === ACTORS (TOP LEVEL) ===
+Person(newClient, "Новый клиент", "Подаёт заявку через сайт")
+Person(existingClient, "Действующий клиент", "Оформляет депозит в интернет‑банке") 
+Person(operator, "Оператор кол‑центра", "Работает в CRM")
+
+' >>> ДОБАВЛЕНО: бэк‑офис депозитов как роль/персона
+Person(backofficeDeposits, "Бэк‑офис депозитов", "Обрабатывает заявки, подтверждает условия в АБС")
+
+' Force positioning
+newClient -[hidden]- existingClient
+existingClient -[hidden]- operator
+operator -[hidden]- backofficeDeposits
+
+' === FRONTEND SYSTEMS ===
+System_Boundary(frontend, "Фронтенд системы") {
+  System(web, "Публичный сайт", "Форма заявки,\nсписок актуальных ставок")
+  System(ib, "Интернет‑банк", "Персонализированные ставки,\nзаявка, СМС‑подтверждение")
+  web -[hidden]- ib
 }
 
-' === ВНУТРЕННИЕ СИСТЕМЫ (ГРУППИРОВКА) ===
-together {
-  System(web, "Сайт (Public Web)", "", "Форма заявки, список актуальных ставок")
-  System(ib, "Интернет‑банк", "", "Персонализированные ставки, заявка, СМС‑подтверждение")
-  System(iam, "IAM/SSO", "", "Централизованная аутентификация/авторизация, OIDC/OAuth2, единые политики")
+' === CORE INTERNAL SYSTEMS ===
+System_Boundary(core, "Основные системы банка") {
+  System(iam, "IAM/SSO", "Централизованная аутентификация,\nOIDC/OAuth2, единые политики")
+  System(crm, "CRM (Кол‑центр)", "Обработка обращений\nи заявок клиентов")
+  System(abs, "АБС", "Учёт счетов/депозитов,\nдоговоры, расчёт")
+  iam -[hidden]- crm
+  crm -[hidden]- abs
 }
 
-together {
-  System(crm, "Кол‑центр (CRM)", "", "Обработка обращений клиентов")
-  System(abs, "АБС", "", "Учёт счетов/депозитов, договоры, расчёт/подтверждение")
+' === BACK-OFFICE SYSTEMS ===
+System_Boundary(backoffice, "Бэк-офис системы") {
+  System(sms, "СМС‑шлюз", "Отправка СМС‑уведомлений\n(поддержка IT-отдела)")
+  System(excel, "Excel (ставки)", "Расчёт ставок отделом кредитования\nна основе ставки рефинансирования ЦБ")
+  sms -[hidden]- excel
 }
 
-' === ВНЕШНИЕ СИСТЕМЫ (ГРУППИРОВКА) ===
-together {
-  System_Ext(sms, "СМС‑шлюз", "", "Отправка СМС‑уведомлений")
-  System_Ext(excel, "Excel (ставки)", "", "Ручной расчёт/хранение ставок (as‑is)")
+System_Boundary(external, "Внешние системы") {
+  System_Ext(cbrf, "Центробанк РФ", "Ставка рефинансирования")
 }
 
-' === ВЗАИМОДЕЙСТВИЯ ===
+frontend -[hidden]- core
+core -[hidden]- backoffice
+backoffice -[hidden]- external
 
-' Связи человек → система
-Rel(newClient, web, "Выбор депозита и подача заявки", "HTTPS/TLS")
-Rel(existingClient, ib, "Просмотр ставок, заявка, СМС‑подтверждение", "HTTPS/TLS")
-Rel(operator, crm, "Звонок клиенту, работа с обращениями")
+' === PRIMARY USER FLOWS ===
+Rel_D(newClient, web, "Выбор депозита\nи подача заявки", "HTTPS")
+Rel_D(existingClient, ib, "Просмотр ставок,\nзаявка", "HTTPS")
+Rel_D(operator, crm, "Обработка обращений\nи звонки клиентам", "")
 
-' Аутентификация через IAM/SSO
-Rel(newClient, iam, "Аутентификация (для зарегистрированных)", "OIDC/OAuth2")
-Rel(existingClient, iam, "Единый вход в систему", "OIDC/OAuth2")
+' >>> ДОБАВЛЕНО: связи бэк‑офиса депозитов
+Rel(backofficeDeposits, abs, "Обработка заявки,\nподтверждение условий", "АРМ АБС")
+Rel(backofficeDeposits, excel, "Работа со ставками (as‑is)", "ручные файлы")
 
-' Связи система → система (только high‑level)
-Rel(web, iam, "Проверка аутентификации", "OIDC/JWT")
-Rel(ib, iam, "Единый вход и авторизация", "OIDC/JWT")
-Rel(web, crm, "Передача заявки/лида", "REST/TLS")
-Rel(crm, abs, "Создание/уточнение заявки", "Интеграция")
-Rel(ib, abs, "Передача заявки", "REST/интеграция")
+' === AUTHENTICATION FLOWS ===  
+Rel(web, iam, "Проверка\nаутентификации", "OIDC/JWT")
+Rel(ib, iam, "Единый вход\nи авторизация", "OIDC/JWT")
 
-Rel(abs, sms, "Уведомления о ставке/открытии", "SMS API")
-Rel(sms, newClient, "SMS")
-Rel(sms, existingClient, "SMS")
+' === INTERNAL INTEGRATION ===
+Rel(web, crm, "Передача\nзаявки/лида", "REST API")
+Rel(ib, abs, "Передача\nзаявки", "REST API")
+Rel(crm, abs, "Создание/уточнение\nзаявки", "")
 
-Rel(abs, excel, "Импорт/экспорт ставок (ручной обмен)")
+' === EXTERNAL COMMUNICATION ===
+Rel_U(abs, sms, "Уведомления о ставке\nи открытии депозита", "Internal API")
+Rel_L(sms, newClient, "SMS-уведомления", "")
+Rel_L(sms, existingClient, "SMS-уведомления", "")
 
+' === DATA EXCHANGE ===
+Rel(excel, abs, "Передача ставок\nв бэк-офис", "Email (ежедневно)")
+Rel(cbrf, excel, "Ставка рефинансирования", "Публичные данные")
+Rel(abs, excel, "Данные по кредитам\nи депозитам", "Отчёты")
+
+SHOW_PERSON_OUTLINE()
 @enduml
