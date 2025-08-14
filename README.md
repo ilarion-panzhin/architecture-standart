@@ -1,1 +1,1 @@
-# architecture-standart
+# Project work of Sprint 9: architecture-standart
