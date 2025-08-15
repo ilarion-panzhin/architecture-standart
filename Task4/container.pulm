@@ -1,0 +1,53 @@
+@startuml
+!includeurl https://raw.githubusercontent.com/RicardoNiepel/C4-PlantUML/master/C4_Container.puml
+LAYOUT_TOP_DOWN()
+title C4‑L2 (минимум): Передача актуальных ставок во внутренний и партнёрский кол-центры (основано на текущем процессе)
+
+' ==== PERSONAS ====
+Person(intOp, "Оператор внутреннего КЦ", "Консультирует по ставкам")
+Person(partnerOp, "Оператор партнёрского КЦ", "Консультирует по ставкам")
+
+' ==== БАНК ====
+System_Boundary(bank, "Банк «Стандарт»") {
+
+  ' --- Внутренний кол-центр / CRM ---
+  System_Boundary(cc, "Кол-центр / CRM") {
+    Container(crm_ui, "CRM UI", "React", "Экран оператора: показывает ставки")
+    Container(crm_be, "CRM Backend", "Java Spring Boot", "Карточки, обращения, интеграции")
+    ContainerDb(crm_db, "CRM DB", "PostgreSQL", "Данные обращений/лидов")
+  }
+
+  ' --- Сервис ставок (минимальный) ---
+  System_Boundary(rates, "Публикация ставок (из Excel)") {
+    Container(excel, "Excel (ставки, as‑is)", "XLS/XLSX", "Исходник ставок от бэк‑офиса (как сейчас)")
+    Container(rates_api, "Rates API", ".NET/Java", "Тонкий фасад: парсит Excel и отдаёт актуальные ставки по REST")
+    ContainerDb(rates_cache, "Rates Cache DB", "MS SQL", "Кэш/снапшот ставок для быстрых чтений и аудита")
+    Container(mail, "Secure Mail Gateway", "Email + PGP/ZIP", "Отправка файла ставок партнёру (MVP)")
+  }
+}
+
+' ==== ПАРТНЁР ====
+System_Boundary(partner, "Партнёрский кол-центр") {
+  Container(partner_cc, "Partner CC System", "3rd‑party", "Ручной импорт файла ставок и отображение")
+}
+
+' ==== СВЯЗИ ====
+
+' Операторы
+Rel(intOp, crm_ui, "Смотреть ставки")
+Rel(partnerOp, partner_cc, "Смотреть ставки")
+
+' CRM ↔ Rates API
+Rel(crm_ui, crm_be, "HTTP")
+Rel(crm_be, rates_api, "GET /rates (актуальные ставки)", "REST/TLS")
+Rel(crm_be, crm_db, "Чтение/запись", "SQL")
+
+' Rates API ↔ источники/кэш
+Rel(rates_api, excel, "Читает исходные XLS/XLSX", "File share/ручное обновление")
+Rel(rates_api, rates_cache, "Обновляет/читает снапшот", "SQL")
+
+' Экспорт файла партнёру
+Rel(rates_api, mail, "Сформировать файл ставок (CSV/XLSX) и передать", "PGP/ZIP")
+Rel(mail, partner_cc, "Доставка файла", "Email (MVP)")
+
+@enduml
