@@ -1,0 +1,36 @@
+@startuml
+!includeurl https://raw.githubusercontent.com/RicardoNiepel/C4-PlantUML/master/C4_Context.puml
+LAYOUT_TOP_DOWN()
+title C4-L1: Контекст — Передача актуальных ставок в кол-центры (MVP)
+
+' Персоны
+Person(intOp, "Оператор внутреннего кол-центра", "Консультация клиентов по ставкам")
+Person_Ext(partnerOp, "Оператор партнёрского кол-центра", "Консультация клиентов по ставкам")
+
+' Системы (внутри банка)
+System(abs, "АБС", "Источник истины по ставкам")
+System(crm, "CRM (внутренний кол-центр)", "Работа операторов")
+System(ratesExport, "Сервис выгрузки ставок", "Формирует файл ставок для партнёра")
+
+' Вспомогательный источник (as-is)
+System(excel, "Excel (ставки, as-is)", "Ручной расчёт/консолидация ставок")
+
+' Внешняя система партнёра
+System_Ext(partnerCC, "Система партнёрского кол-центра", "Принимает файл ставок")
+
+' Каналы передачи
+System_Ext(secureTransfer, "Канал передачи файла", "MVP: защищённый архив по email; Target: SFTP")
+
+' Связи человек → система
+Rel(intOp, crm, "Запросить ставки для консультации")
+Rel(partnerOp, partnerCC, "Использовать загруженные ставки")
+
+' Связи система → система (только high-level)
+Rel(crm, abs, "Получить актуальные ставки", "API/интеграция")
+Rel(abs, excel, "Импорт/экспорт данных по ставкам", "ручной/батч (as-is)")
+
+Rel(ratesExport, abs, "Забрать утверждённые ставки", "API/интеграция")
+Rel(ratesExport, secureTransfer, "Подготовить и отправить файл", "CSV/XLSX")
+Rel(secureTransfer, partnerCC, "Доставка файла", "Email (MVP) / SFTP (Target)")
+
+@enduml

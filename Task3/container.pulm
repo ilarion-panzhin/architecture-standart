@@ -1,0 +1,109 @@
+@startuml
+!includeurl https://raw.githubusercontent.com/RicardoNiepel/C4-PlantUML/master/C4_Container.puml
+LAYOUT_TOP_DOWN()
+title C4‑L2: Контейнеры — Интернет‑банк, Сайт, АБС и интеграции (MVP) + БД + Вариант A (Web → Application API)
+
+' ==== PERSONAS ====
+Person(newClient, "Клиент (новый)", "Подаёт заявку через сайт")
+Person(existingClient, "Клиент (действующий)", "Оформляет депозит в интернет-банке")
+Person(operCC, "Оператор кол-центра", "Работает в CRM")
+Person(backofficeDeposits, "Бэк-офис депозитов", "Обрабатывает заявки, подтверждает условия")
+
+' ==== DIGITAL CHANNELS ====
+System_Boundary(dc, "Цифровые каналы") {
+
+  ' --- Сайт ---
+  Container(web_ui, "Web UI (Public Site)", "React", "Форма заявки, список ставок")
+  Container(web_be, "Web Backend", "PHP/Node", "Приём форм, валидация, интеграция с CRM/внутр. сервисами")
+  ContainerDb(web_db, "Web DB", "RDBMS", "Логи форм/трекинг (по необходимости)")
+
+  ' --- Интернет-банк ---
+  Container(ib_ui, "IB Web UI", "ASP.NET MVC 4.5", "UI: выбор депозита, сумма, подтверждение СМС")
+  Container(ib_be, "IB Backend", ".NET Framework", "Бизнес-логика заявок, валидация, аудит")
+  ContainerDb(ib_db, "IB DB", "MS SQL", "Заявки, статусы, справочники, outbox")
+}
+
+' ==== AUTH ====
+Container(iam, "IAM/SSO", "OIDC/OAuth2", "Централизованная аутентификация и сессии")
+ContainerDb(iam_db, "IAM DB", "RDBMS/Directory", "Пользователи/клиенты, сессии, токены")
+
+' ==== DEPOSIT APPLICATION SERVICE (новый слой) ====
+System_Boundary(reqSvc, "Deposit Application Service") {
+  Container(app_api, "Application API", "ASP.NET Web API", "Приём заявок от ИБ/Сайта")
+  Container(app_worker, "Background Worker", ".NET", "Публикация событий о заявках, ретраи")
+  ContainerDb(app_db, "Application DB", "MS SQL", "Заявки, outbox/inbox, аудит интеграций")
+}
+
+Container(eventbus, "Event Bus", "Kafka", "Асинхронные события (Submitted/Approved/Rejected)")
+
+' ==== CRM ====
+System_Boundary(cc, "Кол-центр / CRM") {
+  Container(crm_ui, "CRM Web UI", "React", "Интерфейс оператора")
+  Container(crm_be, "CRM Backend", "Java Spring Boot", "Обращения/лиды, интеграции")
+  ContainerDb(crm_db, "CRM DB", "PostgreSQL", "Лиды/обращения, статусы звонков")
+}
+
+' ==== ABS ====
+System_Boundary(abs_b, "АБС") {
+  Container(abs_core, "ABS Core", "PL/SQL packages", "Deposits/Contracts/CreditRisk")
+  Container(abs_adapter, "ABS Integration Adapter", ".NET/Java", "Консюмер Kafka → вызовы ABS Core")
+  Container(abs_ui, "ABS Desktop (АРМ)", "Delphi", "Рабочие места фронт-/бэк-офиса")
+  ContainerDb(abs_db, "ABS DB", "Oracle", "Счета, клиенты, депозиты, договоры")
+}
+
+' ==== INTERNAL SHARED SERVICES ====
+System_Boundary(internal, "Внутренние сервисы банка") {
+  Container(sms, "СМС-шлюз", "Внутренний сервис", "Отправка СМС, поддержка IT-отдела")
+  ContainerDb(sms_db, "SMS DB", "RDBMS", "Очередь/логи отправки СМС")
+  Container(excel, "Excel (ставки)", "XLS файлы", "Ручной расчёт/хранение ставок (as-is)")
+}
+
+' ==== RELATIONSHIPS ====
+
+' --- Пользователи → каналы
+Rel(newClient, web_ui, "Выбор депозита, отправка формы", "HTTPS")
+Rel(existingClient, ib_ui, "Просмотр ставок, заявка, подтверждение СМС", "HTTPS")
+Rel(operCC, crm_ui, "Работа с обращениями", "")
+Rel(backofficeDeposits, abs_ui, "Обработка заявки/подтверждение условий", "АРМ АБС")
+Rel(backofficeDeposits, excel, "Работа со ставками (as-is)", "файлы")
+
+' --- Внутри каналов
+Rel(web_ui, web_be, "HTTP")
+Rel(web_be, web_db, "Чтение/запись", "SQL")
+Rel(ib_ui, ib_be, "HTTP")
+Rel(ib_be, ib_db, "Чтение/запись", "SQL")
+
+' --- Аутентификация
+Rel(web_ui, iam, "Аутентификация", "OIDC/JWT")
+Rel(ib_ui, iam, "Единый вход", "OIDC/JWT")
+Rel(iam, iam_db, "Чтение/запись", "SQL/Directory")
+
+' --- Сайт → CRM (as-is)
+Rel(web_be, crm_be, "Создание лида/обращения", "REST/TLS")
+Rel(crm_ui, crm_be, "REST/HTTPS")
+Rel(crm_be, crm_db, "Чтение/запись", "SQL")
+
+' --- Сайт → Application API (Вариант A: параллельно в единый конвейер)
+Rel(web_be, app_api, "Черновик заявки (параллельно с CRM)", "REST/TLS")
+
+' --- ИБ → Application Service → Kafka → ABS
+Rel(ib_be, app_api, "Передача заявки", "REST/TLS")
+Rel(app_api, app_db, "Чтение/запись", "SQL")
+Rel(app_db, app_worker, "Outbox poll", "SQL")
+Rel(app_worker, eventbus, "Публикует событие: DepositApplicationSubmitted", "Kafka")
+Rel(eventbus, abs_adapter, "Консюмит события", "Kafka")
+Rel(abs_adapter, abs_core, "Создание/обновление заявки", "Integration call/PROC")
+Rel(abs_core, abs_db, "Чтение/запись", "Oracle SQL")
+
+' --- CRM ↔ ABS (as-is)
+Rel(crm_be, abs_core, "Создание/уточнение заявки", "Интеграция (существующая)")
+
+' --- ABS ↔ Excel (ручной/батч)
+Rel(abs_core, excel, "Импорт/экспорт ставок", "ручной обмен файлами")
+
+' --- СМС
+Rel(ib_be, sms, "Отправка/проверка СМС‑кода (OTP)", "Internal API")
+Rel(abs_core, sms, "Уведомления о ставке/открытии", "Internal API")
+Rel(sms, sms_db, "Логи/очереди отправки", "SQL")
+
+@enduml
